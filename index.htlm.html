@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mapa Interactivo de Instrumentos del Mundo</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- D3.js y TopoJSON para renderizar el mapamundi político -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://unpkg.com/topojson-client@3"></script>
+  <!-- Tipografías Lora y Plus Jakarta Sans -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lora:wght@600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+  <!-- Font Awesome 6.5.1 -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <style>
+    /* Tipografía principal y estética oscura */
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background-color: #1c1917;
+      color: #faf8f5;
+      margin: 0;
+      padding: 0;
+    }
+
+    h1, h2, h3 {
+      font-family: 'Lora', serif;
+    }
+
+    /* Animación de pulso para los marcadores del mapa */
+    @keyframes pulse-ring {
+      0% {
+        transform: scale(0.85);
+        opacity: 0.8;
+      }
+      70% {
+        transform: scale(1.6);
+        opacity: 0;
+      }
+      100% {
+        transform: scale(1.6);
+        opacity: 0;
+      }
+    }
+
+    .pin-pulse::before {
+      content: '';
+      position: absolute;
+      inset: -4px;
+      border-radius: 9999px;
+      background-color: inherit;
+      animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+      z-index: -1;
+    }
+
+    /* Barra de desplazamiento personalizada */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #292524;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #57534e;
+      border-radius: 3px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #78716c;
+    }
+  </style>
+</head>
+<body class="h-screen w-screen overflow-hidden flex flex-col lg:flex-row">
+
+  <!-- Contenedor principal: Mapamundi interactivo + Panel lateral (sin barra superior) -->
+  <main class="flex-grow flex flex-col lg:flex-row h-full w-full overflow-hidden relative">
+
+    <!-- Área del mapamundi político -->
+    <div class="flex-grow relative bg-[#0f172a] flex items-center justify-center overflow-auto p-2 sm:p-4 select-none">
+      <!-- Wrapper 2:1 para mantener alineadas las coordenadas porcentuales (x%, y%) -->
+      <div id="mapWrapper" class="relative w-full max-w-[1300px] aspect-[2/1] bg-[#1e3a5f] rounded-2xl overflow-hidden shadow-2xl border-2 border-stone-700">
+
+        <!-- SVG del mapamundi político generado con D3/TopoJSON y respaldo vectorial offline -->
+        <svg id="worldMapSvg" viewBox="0 0 1000 500" preserveAspectRatio="none" class="w-full h-full block pointer-events-none">
+          <defs>
+            <radialGradient id="oceanGrad" cx="50%" cy="50%" r="70%">
+              <stop offset="0%" stop-color="#254e7a" />
+              <stop offset="100%" stop-color="#132942" />
+            </radialGradient>
+          </defs>
+          <rect width="1000" height="500" fill="url(#oceanGrad)" />
+          <!-- Líneas de latitud y longitud decorativas -->
+          <g stroke="#3b6ea5" stroke-width="0.5" stroke-dasharray="4,4" opacity="0.45">
+            <line x1="0" y1="125" x2="1000" y2="125" />
+            <line x1="0" y1="250" x2="1000" y2="250" stroke-dasharray="none" stroke-width="0.8" />
+            <line x1="0" y1="375" x2="1000" y2="375" />
+            <line x1="250" y1="0" x2="250" y2="500" />
+            <line x1="500" y1="0" x2="500" y2="500" stroke-dasharray="none" stroke-width="0.8" />
+            <line x1="750" y1="0" x2="750" y2="500" />
+          </g>
+          <!-- Capa donde se dibujan los países con sus fronteras -->
+          <g id="countriesLayer"></g>
+        </svg>
+
+        <!-- Etiquetas de continentes de referencia -->
+        <span class="absolute top-[28%] left-[18%] text-[10px] sm:text-xs font-extrabold tracking-widest text-amber-100/80 bg-slate-900/50 px-2 py-0.5 rounded uppercase pointer-events-none">América del Norte</span>
+        <span class="absolute top-[68%] left-[28%] text-[10px] sm:text-xs font-extrabold tracking-widest text-amber-100/80 bg-slate-900/50 px-2 py-0.5 rounded uppercase pointer-events-none">América del Sur</span>
+        <span class="absolute top-[20%] left-[50%] text-[10px] sm:text-xs font-extrabold tracking-widest text-amber-100/80 bg-slate-900/50 px-2 py-0.5 rounded uppercase pointer-events-none">Europa</span>
+        <span class="absolute top-[52%] left-[52%] text-[10px] sm:text-xs font-extrabold tracking-widest text-amber-100/80 bg-slate-900/50 px-2 py-0.5 rounded uppercase pointer-events-none">África</span>
+        <span class="absolute top-[26%] left-[72%] text-[10px] sm:text-xs font-extrabold tracking-widest text-amber-100/80 bg-slate-900/50 px-2 py-0.5 rounded uppercase pointer-events-none">Asia</span>
+        <span class="absolute top-[74%] left-[83%] text-[10px] sm:text-xs font-extrabold tracking-widest text-amber-100/80 bg-slate-900/50 px-2 py-0.5 rounded uppercase pointer-events-none">Oceanía</span>
+
+        <!-- Capa donde se renderizan los 30 marcadores numerados -->
+        <div id="pinsContainer" class="absolute inset-0"></div>
+      </div>
+
+      <!-- Leyenda flotante en el mapa -->
+      <div class="hidden sm:flex items-center gap-4 bg-stone-900/90 backdrop-blur-md border border-stone-700 px-4 py-2 rounded-full text-xs text-stone-300 absolute bottom-4 left-6 shadow-lg">
+        <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-rose-500 inline-block"></span> Cuerda</span>
+        <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-sky-500 inline-block"></span> Viento</span>
+        <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-amber-500 inline-block"></span> Percusión</span>
+      </div>
+    </div>
+
+    <!-- Panel lateral derecho: Lista de países e instrumentos (1-30) -->
+    <aside class="w-full lg:w-80 bg-stone-900 border-t lg:border-t-0 lg:border-l border-stone-800 flex flex-col max-h-64 lg:max-h-full">
+      <div class="p-3 border-b border-stone-800 flex items-center justify-between">
+        <span class="text-xs font-bold uppercase tracking-wider text-stone-400">Listado de Países (1-30)</span>
+        <span id="counterBadge" class="text-xs bg-stone-800 text-amber-400 px-2 py-0.5 rounded-full font-semibold">30</span>
+      </div>
+      <div id="instrumentsList" class="overflow-y-auto p-2 space-y-1 flex-grow">
+        <!-- Se llena dinámicamente con JavaScript -->
+      </div>
+    </aside>
+
+  </main>
+
+  <!-- Ventana modal emergente al seleccionar un instrumento -->
+  <div id="modalOverlay" onclick="closeModal(event)" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 hidden items-center justify-center p-4 transition-opacity">
+    <div id="modalCard" class="bg-stone-900 border border-stone-700 rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl transform transition-all scale-95 opacity-0">
+
+      <!-- Cabecera degradada según la familia instrumental -->
+      <div id="modalHeader" class="p-6 pb-5 relative bg-gradient-to-r from-rose-600 to-rose-800 text-white">
+        <button onclick="forceCloseModal()" class="absolute top-4 right-4 w-8 h-8 rounded-full bg-black/30 hover:bg-black/50 flex items-center justify-center text-white transition" aria-label="Cerrar ficha">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+        <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider opacity-90 mb-1">
+          <span id="modalNumber" class="bg-black/30 px-2 py-0.5 rounded">#1</span>
+          <span>•</span>
+          <span id="modalCountry"><i class="fa-solid fa-location-dot mr-1"></i>País</span>
+        </div>
+        <h2 id="modalTitle" class="text-3xl font-bold leading-tight">Nombre Instrumento</h2>
+      </div>
+
+      <!-- Cuerpo de la ficha -->
+      <div class="p-6 space-y-4">
+        <div class="flex flex-wrap gap-2">
+          <span id="modalFamilyBadge" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+            <i id="modalFamilyIcon" class="fa-solid fa-guitar"></i>
+            <span id="modalFamilyText">Familia</span>
+          </span>
+        </div>
+
+        <p id="modalDescription" class="text-stone-300 text-sm leading-relaxed">
+          Descripción del instrumento tradicional y cómo se interpreta.
+        </p>
+
+        <!-- Botones de acción: YouTube y Volver al mapa -->
+        <div class="pt-2 flex flex-col sm:flex-row gap-3">
+          <a
+            id="youtubeLink"
+            href="#"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition shadow-lg shadow-red-900/30 text-sm"
+          >
+            <i class="fa-brands fa-youtube text-lg"></i>
+            <span>Ver cómo se toca en YouTube</span>
+          </a>
+          <button onclick="forceCloseModal()" class="py-3 px-4 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 font-semibold text-sm transition">
+            Volver al mapa
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * Dibuja el mapamundi político con fronteras usando D3 y TopoJSON (1000x500),
+     * con respaldo vectorial offline si no hay conexión o falla la carga del recurso.
+     */
+    async function drawWorldMap() {
+      const layer = document.getElementById('countriesLayer');
+      const politicalColors = ['#d8c9a8', '#c8b894', '#dfd2b5', '#bfae88', '#e5d9be', '#cbb992'];
+
+      // Proyección equirectangular exacta (1000x500) alineada con las coordenadas (x%, y%)
+      const projection = d3.geoEquirectangular()
+        .scale(159.15)
+        .translate([500, 250]);
+      const pathGenerator = d3.geoPath().projection(projection);
+
+      try {
+        if (typeof d3 === 'undefined' || typeof topojson === 'undefined') {
+          throw new Error('D3 o TopoJSON no están disponibles');
+        }
+
+        const res = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
+        if (!res.ok) {
+          throw new Error(`Error HTTP ${res.status} al cargar el mapa`);
+        }
+
+        const worldData = await res.json();
+        const countries = topojson.feature(worldData, worldData.objects.countries).features;
+
+        d3.select('#countriesLayer')
+          .selectAll('path')
+          .data(countries)
+          .enter()
+          .append('path')
+          .attr('d', pathGenerator)
+          .attr('fill', (d, i) => politicalColors[i % politicalColors.length])
+          .attr('stroke', '#475569')
+          .attr('stroke-width', '0.6');
+      } catch (err) {
+        // Respaldo vectorial offline de los continentes
+        layer.innerHTML = `
+          <g fill="#d8c9a8" stroke="#475569" stroke-width="1.2">
+            <!-- América del Norte y Central -->
+            <path d="M 65,55 L 250,45 L 315,35 L 345,75 L 295,120 L 275,165 L 235,205 L 265,245 L 285,265 L 260,260 L 210,220 L 165,175 L 135,115 L 65,95 Z"/>
+            <!-- Groenlandia -->
+            <path d="M 335,22 L 425,18 L 415,75 L 355,85 Z"/>
+            <!-- América del Sur -->
+            <path d="M 285,265 L 345,275 L 385,325 L 355,415 L 315,468 L 295,455 L 285,365 L 265,305 Z"/>
+            <!-- Europa -->
+            <path d="M 455,145 L 475,95 L 535,55 L 595,65 L 615,135 L 565,155 L 515,155 L 475,165 Z"/>
+            <!-- África -->
+            <path d="M 455,175 L 545,175 L 605,235 L 585,335 L 545,395 L 515,385 L 495,285 L 445,255 Z"/>
+            <!-- Asia -->
+            <path d="M 595,65 L 885,65 L 925,115 L 865,195 L 815,245 L 745,255 L 695,245 L 645,205 L 595,175 Z"/>
+            <!-- Japón e Indonesia -->
+            <path d="M 870,135 L 895,135 L 885,175 L 865,175 Z"/>
+            <path d="M 765,265 L 845,275 L 835,295 L 755,285 Z"/>
+            <!-- Oceanía / Australia -->
+            <path d="M 795,325 L 885,325 L 895,395 L 815,405 L 785,365 Z"/>
+            <path d="M 915,415 L 945,405 L 935,445 L 905,445 Z"/>
+          </g>
+        `;
+      }
+    }
+
+    /**
+     * Listado oficial de los 30 instrumentos (1 - 30) con sus coordenadas (x%, y%),
+     * familia instrumental, descripción y enlace directo a un vídeo de YouTube.
+     */
+    const instruments = [
+      { id: 1, name: "Balalaika", country: "Rusia", family: "Cuerda", sub: "Cuerda pulsada", x: 68.0, y: 18.0, desc: "Laúd tradicional ruso de cuerpo triangular característico y tres cuerdas que se toca rasgueando o punteando con los dedos.", ytUrl: "http://www.youtube.com/watch?v=hH5znHQ9QRY" },
+      { id: 2, name: "Bandoneón", country: "Argentina", family: "Viento", sub: "Viento (lengüeta libre)", x: 31.5, y: 76.0, desc: "Aerófono portátil de fuelle rectangular y botones, emblema indiscutible del tango rioplatense.", ytUrl: "http://www.youtube.com/watch?v=Xa_Ee8h_7GU" },
+      { id: 3, name: "Banjo", country: "Estados Unidos", family: "Cuerda", sub: "Cuerda pulsada", x: 21.0, y: 31.0, desc: "Instrumento de 4 o 5 cuerdas con caja de resonancia circular cubierta por un parche tensado, fundamental en el bluegrass y folk.", ytUrl: "http://www.youtube.com/watch?v=85mDyWCgHy0" },
+      { id: 4, name: "Charango", country: "Bolivia", family: "Cuerda", sub: "Cuerda pulsada", x: 30.2, y: 63.5, desc: "Pequeño instrumento de cuerda de la región andina con cinco pares de cuerdas dobles y sonido brillante.", ytUrl: "http://www.youtube.com/watch?v=JU19N_jNw_o" },
+      { id: 5, name: "Ch'in", country: "China", family: "Cuerda", sub: "Cuerda pulsada", x: 77.5, y: 34.0, desc: "Cítara china tradicional de siete cuerdas sin trastes, interpretada pulsando las cuerdas y deslizando los dedos para modular el tono.", ytUrl: "http://www.youtube.com/watch?v=h0AAFhx3RmA" },
+      { id: 6, name: "Címbalo", country: "Hungría", family: "Cuerda", sub: "Cuerda percutida", x: 54.0, y: 24.5, desc: "Salterio de gran tamaño cuyas cuerdas metálicas se golpean con dos macillos ligeros; muy usado en la música folclórica húngara.", ytUrl: "http://www.youtube.com/watch?v=0mR0_nFTato" },
+      { id: 7, name: "Darbuka", country: "Egipto", family: "Percusión", sub: "Percusión (membranófono)", x: 56.5, y: 38.5, desc: "Tambor en forma de copa de origen árabe, tocado con las manos alternando golpes graves centrados y agudos en el borde.", ytUrl: "http://www.youtube.com/watch?v=Y_ZFCDVhS-4" },
+      { id: 8, name: "Digerido", country: "Australia", family: "Viento", sub: "Viento (embocadura)", x: 84.5, y: 72.0, desc: "Instrumento de viento ancestral aborigen australiano hecho de madera ahuecada, interpretado con vibración labial y respiración circular.", ytUrl: "http://www.youtube.com/watch?v=yG9ZX1FS20A" },
+      { id: 9, name: "Erhu", country: "China", family: "Cuerda", sub: "Cuerda frotada", x: 79.5, y: 36.5, desc: "Instrumento de cuerda frotada chino de dos cuerdas con caja de resonancia cubierta de piel; el arco se desliza entre ambas cuerdas.", ytUrl: "http://www.youtube.com/watch?v=AVXejOoPECA" },
+      { id: 10, name: "Flabiol", country: "España", family: "Viento", sub: "Viento (bisel)", x: 48.8, y: 27.8, desc: "Pequeña flauta de pico tradicional que se toca con una sola mano, dejando la otra libre para percutir un tamboril simultáneamente.", ytUrl: "http://www.youtube.com/watch?v=Jw8QAYH8zJ4" },
+      { id: 11, name: "Gaita", country: "España", family: "Viento", sub: "Viento (lengüeta y odre)", x: 46.2, y: 26.8, desc: "Aerófono tradicional con bolsa o fuelle que alimenta un puntero melódico y tubos roncones que sostienen una base armónica.", ytUrl: "http://www.youtube.com/watch?v=DYPACarWO_g" },
+      { id: 12, name: "Ghatam", country: "India", family: "Percusión", sub: "Percusión (idiófono)", x: 70.5, y: 47.5, desc: "Vasija de barro cocido utilizada en la música clásica del sur de la India; se percute con manos y dedos y se modula contra el cuerpo.", ytUrl: "http://www.youtube.com/watch?v=1MPFbbppAt4" },
+      { id: 13, name: "Guitarra", country: "España", family: "Cuerda", sub: "Cuerda pulsada", x: 47.3, y: 28.5, desc: "Instrumento de seis cuerdas con caja de resonancia en forma de ocho, esencial en la música española, flamenca y de concierto.", ytUrl: "http://www.youtube.com/watch?v=s-NzOxyi-VY" },
+      { id: 14, name: "Kora", country: "Malí", family: "Cuerda", sub: "Cuerda pulsada", x: 46.5, y: 44.5, desc: "Arpa-laúd de 21 cuerdas de África Occidental construida con media calabaza y piel, tocada con los pulgares e índices.", ytUrl: "http://www.youtube.com/watch?v=-cLAwAOi-hA" },
+      { id: 15, name: "Koto", country: "Japón", family: "Cuerda", sub: "Cuerda pulsada", x: 87.2, y: 31.5, desc: "Cítara larga japonesa con puentes móviles para afinar cada cuerda, pulsada mediante púas colocadas en los dedos.", ytUrl: "http://www.youtube.com/watch?v=JDTp_YQizqE" },
+      { id: 16, name: "Mandolina", country: "Italia", family: "Cuerda", sub: "Cuerda pulsada", x: 52.0, y: 27.5, desc: "Instrumento italiano de cuatro pares de cuerdas dobles, habitualmente tocado con púa y con trémolos rápidos característicos.", ytUrl: "http://www.youtube.com/watch?v=5FlNBuS7YgM" },
+      { id: 17, name: "Ney", country: "Irán / Turquía", family: "Viento", sub: "Viento (bisel)", x: 61.5, y: 33.5, desc: "Flauta oblicua de caña hueca de Oriente Medio, soplada en el extremo superior con un timbre cálido y expresivo.", ytUrl: "http://www.youtube.com/watch?v=dKFjixNeL5s" },
+      { id: 18, name: "Pip'a", country: "China", family: "Cuerda", sub: "Cuerda pulsada", x: 81.2, y: 33.5, desc: "Laúd chino de cuatro cuerdas con caja en forma de pera que se toca en posición vertical combinando punteos y rasgueos.", ytUrl: "http://www.youtube.com/watch?v=ksiM1wRcutQ" },
+      { id: 19, name: "Quena", country: "Perú", family: "Viento", sub: "Viento (bisel)", x: 28.0, y: 58.0, desc: "Flauta recta andina de caña o madera con una muesca en su extremo superior, soplada dirigiendo el aire sobre el filo.", ytUrl: "http://www.youtube.com/watch?v=8kQZHYbZkLs" },
+      { id: 20, name: "Rebab", country: "Indonesia / Afganistán", family: "Cuerda", sub: "Cuerda frotada", x: 78.5, y: 55.5, desc: "Instrumento de cuerda frotada con arco y caja pequeña recubierta de membrana, presente en tradiciones musicales de Asia y el mundo islámico.", ytUrl: "http://www.youtube.com/watch?v=CNhJ11XbonE" },
+      { id: 21, name: "Sanza", country: "Zimbabue", family: "Percusión", sub: "Percusión (lamelófono)", x: 56.5, y: 63.0, desc: "Idiófono africano de láminas metálicas fijadas sobre una tabla o caja resonante, pulsadas principalmente con los pulgares.", ytUrl: "http://www.youtube.com/watch?v=fb9qoEHLgVo" },
+      { id: 22, name: "Shakuhachi", country: "Japón", family: "Viento", sub: "Viento (bisel)", x: 88.5, y: 30.0, desc: "Flauta japonesa de bambú grueso soplada por el extremo superior, capaz de sutiles matices de afinación y timbre.", ytUrl: "http://www.youtube.com/watch?v=hmRPECd9Yig" },
+      { id: 23, name: "Sheng", country: "China", family: "Viento", sub: "Viento (lengüeta libre)", x: 80.5, y: 31.0, desc: "Órgano de boca chino compuesto por tubos de bambú con lengüetas libres sobre una cámara de aire, apto para melodías y acordes.", ytUrl: "http://www.youtube.com/watch?v=z0Mn95BZ6_s" },
+      { id: 24, name: "Sicu", country: "Perú / Bolivia", family: "Viento", sub: "Viento (flauta de Pan)", x: 29.2, y: 61.0, desc: "Flauta de Pan andina formada por tubos de caña cerrados de distintas longitudes, a menudo tocada alternando notas entre intérpretes.", ytUrl: "http://www.youtube.com/watch?v=_zk_jKHfmJ4" },
+      { id: 25, name: "Sitar", country: "India", family: "Cuerda", sub: "Cuerda pulsada", x: 70.0, y: 40.5, desc: "Laúd clásico del norte de la India de mástil largo, trastes curvos y cuerdas simpáticas resonantes, pulsado con púa metálica.", ytUrl: "http://www.youtube.com/watch?v=KBYSpR8N6pc" },
+      { id: 26, name: "Tabla", country: "India", family: "Percusión", sub: "Percusión (membranófono)", x: 71.8, y: 42.5, desc: "Pareja de tambores de mano de la música clásica indostánica (uno agudo y otro grave), tocados con gran precisión rítmica.", ytUrl: "http://www.youtube.com/watch?v=r31oe7Sm0vI" },
+      { id: 27, name: "Tumbadora", country: "Cuba", family: "Percusión", sub: "Percusión (membranófono)", x: 25.5, y: 41.5, desc: "Tambor alto y estrecho de origen afrocubano con un solo parche, percutido con las manos para generar patrones rítmicos bailables.", ytUrl: "http://www.youtube.com/watch?v=tNrGZelOvC0" },
+      { id: 28, name: "Txalaparta", country: "España", family: "Percusión", sub: "Percusión (idiófono)", x: 47.6, y: 26.5, desc: "Instrumento de percusión de tablones de madera golpeados verticalmente con palos por dos intérpretes en un diálogo rítmico.", ytUrl: "http://www.youtube.com/watch?v=cX0Gg33GIuw" },
+      { id: 29, name: "Ûd", country: "Irak / Siria", family: "Cuerda", sub: "Cuerda pulsada", x: 59.5, y: 34.5, desc: "Laúd de caja abombada y mástil sin trastes central en la música árabe, pulsado con una púa alargada llamada risha.", ytUrl: "http://www.youtube.com/watch?v=niIgRABM1n4" },
+      { id: 30, name: "Whistle", country: "Irlanda", family: "Viento", sub: "Viento (bisel)", x: 45.8, y: 22.8, desc: "Flauta recta de seis agujeros de sonido claro y ágil, fundamental en la música tradicional irlandesa.", ytUrl: "http://www.youtube.com/watch?v=figYOwqiK0I" }
+    ];
+
+    // Colores y estilos según la familia instrumental
+    const familyStyles = {
+      'Cuerda': {
+        pinBg: 'bg-rose-500',
+        pinBorder: 'border-rose-200',
+        gradient: 'from-rose-600 to-rose-800',
+        badge: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
+        icon: 'fa-guitar'
+      },
+      'Viento': {
+        pinBg: 'bg-sky-500',
+        pinBorder: 'border-sky-200',
+        gradient: 'from-sky-600 to-sky-800',
+        badge: 'bg-sky-500/20 text-sky-300 border-sky-500/30',
+        icon: 'fa-wind'
+      },
+      'Percusión': {
+        pinBg: 'bg-amber-500',
+        pinBorder: 'border-amber-200',
+        gradient: 'from-amber-600 to-amber-800',
+        badge: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+        icon: 'fa-drum'
+      }
+    };
+
+    /**
+     * Renderiza los 30 marcadores numerados sobre el mapa y las filas en el panel lateral.
+     */
+    function renderAll() {
+      const pinsContainer = document.getElementById('pinsContainer');
+      const listContainer = document.getElementById('instrumentsList');
+      const counterBadge = document.getElementById('counterBadge');
+
+      pinsContainer.innerHTML = '';
+      listContainer.innerHTML = '';
+      counterBadge.textContent = instruments.length;
+
+      instruments.forEach(item => {
+        const style = familyStyles[item.family] || familyStyles['Cuerda'];
+
+        // 1. Marcador en el mapa con etiqueta flotante al pasar el ratón
+        const pin = document.createElement('button');
+        pin.style.left = `${item.x}%`;
+        pin.style.top = `${item.y}%`;
+        pin.className = `group absolute -translate-x-1/2 -translate-y-1/2 w-5 h-5 sm:w-6 sm:h-6 rounded-full ${style.pinBg} border-2 ${style.pinBorder} text-white font-bold text-[9px] sm:text-[10px] flex items-center justify-center shadow-lg hover:scale-125 hover:z-30 transition-transform cursor-pointer pin-pulse focus:outline-none`;
+        pin.setAttribute('aria-label', `${item.id}. ${item.name} (${item.country})`);
+        pin.innerHTML = `
+          <span>${item.id}</span>
+          <span class="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity absolute bottom-full mb-1.5 whitespace-nowrap bg-stone-950/95 text-white text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-stone-700 shadow-xl z-40">
+            ${item.country}: <span class="text-amber-400">${item.name}</span>
+          </span>
+        `;
+        pin.onclick = () => openModal(item);
+        pinsContainer.appendChild(pin);
+
+        // 2. Fila interactiva en el panel lateral derecho
+        const row = document.createElement('button');
+        row.className = 'w-full text-left px-3 py-2 rounded-xl hover:bg-stone-800/90 transition flex items-center justify-between gap-2 group';
+        row.onclick = () => openModal(item);
+        row.innerHTML = `
+          <div class="flex items-center gap-2.5 min-w-0">
+            <span class="w-6 h-6 rounded-full ${style.pinBg} text-white text-[11px] font-bold flex items-center justify-center flex-shrink-0">
+              ${item.id}
+            </span>
+            <div class="truncate">
+              <p class="text-xs font-bold text-stone-100 group-hover:text-amber-400 transition truncate">${item.name}</p>
+              <p class="text-[11px] text-stone-400 truncate">${item.country}</p>
+            </div>
+          </div>
+          <span class="text-[10px] px-2 py-0.5 rounded-md bg-stone-800 text-stone-300 border border-stone-700 flex-shrink-0">
+            ${item.family}
+          </span>
+        `;
+        listContainer.appendChild(row);
+      });
+    }
+
+    /**
+     * Abre la ventana modal con los datos del instrumento seleccionado.
+     */
+    function openModal(item) {
+      const style = familyStyles[item.family] || familyStyles['Cuerda'];
+
+      const header = document.getElementById('modalHeader');
+      header.className = `p-6 pb-5 relative bg-gradient-to-r ${style.gradient} text-white`;
+
+      document.getElementById('modalNumber').textContent = `#${item.id}`;
+      document.getElementById('modalCountry').innerHTML = `<i class="fa-solid fa-location-dot mr-1"></i>${item.country}`;
+      document.getElementById('modalTitle').textContent = item.name;
+
+      const badge = document.getElementById('modalFamilyBadge');
+      badge.className = `inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${style.badge}`;
+      document.getElementById('modalFamilyIcon').className = `fa-solid ${style.icon}`;
+      document.getElementById('modalFamilyText').textContent = item.sub;
+
+      document.getElementById('modalDescription').textContent = item.desc;
+
+      // Enlace directo a un vídeo específico en YouTube para ver cómo se toca el instrumento
+      document.getElementById('youtubeLink').href = item.ytUrl;
+
+      // Mostrar ventana modal con transición
+      const overlay = document.getElementById('modalOverlay');
+      const card = document.getElementById('modalCard');
+      overlay.classList.remove('hidden');
+      overlay.classList.add('flex');
+      setTimeout(() => {
+        card.classList.remove('scale-95', 'opacity-0');
+        card.classList.add('scale-100', 'opacity-100');
+      }, 10);
+    }
+
+    /**
+     * Cierra la ventana modal al hacer clic sobre el fondo oscuro.
+     */
+    function closeModal(event) {
+      if (event.target.id === 'modalOverlay') {
+        forceCloseModal();
+      }
+    }
+
+    /**
+     * Cierra la ventana modal con animación.
+     */
+    function forceCloseModal() {
+      const overlay = document.getElementById('modalOverlay');
+      const card = document.getElementById('modalCard');
+      card.classList.remove('scale-100', 'opacity-100');
+      card.classList.add('scale-95', 'opacity-0');
+      setTimeout(() => {
+        overlay.classList.add('hidden');
+        overlay.classList.remove('flex');
+      }, 150);
+    }
+
+    // Cerrar la ventana modal con la tecla Escape
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') forceCloseModal();
+    });
+
+    // Inicializar mapamundi y marcadores
+    drawWorldMap();
+    renderAll();
+  </script>
+</body>
+</html>
